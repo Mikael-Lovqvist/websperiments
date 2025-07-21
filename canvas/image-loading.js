@@ -31,8 +31,18 @@ function setup() {
 setup();
 
 
+const { load_image_from_src, Image_Data_Sampler, Bitfield_Image_Sampler } = await import('../lib/image-functions.js');
 
-const { load_image_from_src, Image_Data_Sampler } = await import('../lib/image-functions.js');
+/*
+//Convert
 const sampler = new Image_Data_Sampler(await load_image_from_src("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABHNCSVQICAgIfAhkiAAAAFVJREFUOE9jZGBg+A/EZAMmsnVCNQ4DA1hAXvn/HxGOjIyMJAULC0gzsiZ0PiHTwC5AB8guQpdD52M1gJA3YK4E0SwgxZSEASjERlMieryQyKc4MwEA45UXJyonWOMAAAAASUVORK5CYII="));
-
 console.log(sampler.encode_as_bitfield());
+*/
+
+//Load
+const sampler = Bitfield_Image_Sampler.from_string('16,16,AAAAAAAAAAAAAA4AEQDx/xGgDqAAAAAAAAAAAAAAAAA=');
+sampler.pixel_map((x, y, value) => {
+	C.beginPath();
+	C.arc(x * 0.1 - sampler.width * .05, sampler.height * .05 - y * 0.1, value ? 0.05 : 0.02, 0, Math.PI * 2);
+	C.fill();
+});
