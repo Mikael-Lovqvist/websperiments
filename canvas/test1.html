@@ -10,7 +10,10 @@
 
 		document.addEventListener('DOMContentLoaded', async () => {
 
-			const initial_code = await (await fetch('initial.js')).text();
+			const params = new URLSearchParams(location.search);
+			const source_doc = params.get('src') || 'initial.js';
+			const initial_code = await (await fetch(source_doc)).text();
+
 			const initialState = cm6.createEditorState(initial_code);
 			const editor = document.getElementById("editor");
 			const view = cm6.createEditorView(initialState, editor);
