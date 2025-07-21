@@ -27,15 +27,14 @@
 
 			function run_experiment() {
 				const code = view.state.doc.toString();
-				const code_to_run = `(canvas, context, code) => {
+				const code_to_run = `async (canvas, context, code) => {
 					const C = context;
 					const W = canvas.width;
 					const H = canvas.height;
 
 					${code}
 				}`;
-				eval(code_to_run)(canvas, context, code);
-
+				return eval(code_to_run)(canvas, context, code);	//Returning it so we can await it if we'd like to
 			}
 
 
