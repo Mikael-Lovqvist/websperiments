@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<title>Test</title>
+	<script src="../lib/cm6.bundle.min.js"></script>
+	<!-- https://github.com/RPGillespie6/codemirror-quickstart -->
+
+	<script type="module">
+
+		document.addEventListener('DOMContentLoaded', async () => {
+
+			const initial_code = await (await fetch('initial.js')).text();
+			const initialState = cm6.createEditorState(initial_code);
+			const editor = document.getElementById("editor");
+			const view = cm6.createEditorView(initialState, editor);
+
+			const run_button = document.getElementById("run");
+
+			const canvas = document.getElementById("canvas");
+			const context = canvas.getContext('2d');
+			const auto_run_cb = document.getElementById("auto_run");
+
+
+			function run_experiment() {
+				const code = view.state.doc.toString();
+				const code_to_run = `(canvas, context, code) => {
+					const C = context;
+					const W = canvas.width;
+					const H = canvas.height;
+
+					${code}
+				}`;
+				eval(code_to_run)(canvas, context, code);
+
+			}
+
+
+
+			document.addEventListener('keydown', (event) => {
+				if (event.altKey && event.key.toLowerCase() === 'r') {
+					event.preventDefault(); // Prevent any default behavior
+					run_experiment();
+				}
+				if (event.altKey && event.key.toLowerCase() === 'a') {
+					event.preventDefault(); // Prevent any default behavior
+					auto_run_cb.checked = !auto_run_cb.checked;
+					auto_run_cb.dispatchEvent(new Event("change"));
+				}
+			});
+
+			run_button.addEventListener('click', (event) => {
+				run_experiment();
+			});
+
+
+			const observer = new MutationObserver(() => {
+				run_experiment();
+			});
+
+			auto_run_cb.addEventListener("change", (e) => {
+				const enabled = e.target.checked;
+				if (enabled) {
+					observer.observe(editor, { characterData: true, attributes: false, childList: false, subtree: true });
+				} else {
+					observer.disconnect();
+				}
+			});
+
+			run_experiment();
+
+
+		});
+	</script>
+	<style>
+		kbd {
+			border: 1px #CCC outset;
+			padding: 0em 0.2em;
+			border-radius: 0.3em;
+			margin: 0.2em;
+			background-color: #EEE;
+			box-shadow: 0.2em 0.2em 0.5em rgba(0,0,0,0.5);
+		}
+		.toolbar {
+			padding: .5em 0em;
+			background-color: #EEF;
+		}
+		#run {
+			border-radius: 0.5em;
+			padding: 0.25em .5em;
+			margin-right: 1em;
+			background-color: #CFC;
+		}
+
+		html, body {
+			height: 100%;
+			margin: 0;
+			display: flex;
+			flex-direction: column;
+		}
+
+		#canvas {
+			margin: 0.5em;
+		}
+
+		body > .top {
+			flex: 0 0 auto;
+		}
+
+		body > .view {
+			flex: 1 1 auto;
+			overflow-y: auto;
+			min-height: 0; /* prevents flex from over-expanding */
+		}
+
+
+
+	</style>
+</head>
+<body>
+<div class="top">
+	<canvas id="canvas" style="border: 3px #BBF solid;"></canvas>
+	<div class="toolbar">
+		<button id="run">Run</button>(<kbd>Alt</kbd><kbd>R</kbd>)
+		<input type="checkbox" id="auto_run"><label for="auto_run">Auto run <kbd>Alt</kbd><kbd>A</kbd></label>
+	</div>
+</div>
+<div class="view">
+	<div id="editor"></div>
+</div>
+
+
+</body>
+</html>
