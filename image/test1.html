@@ -141,7 +141,8 @@
 					padding: '0.5em 1em',
 					borderRadius: '5px',
 					opacity: '0.9',
-					zIndex: 1000
+					zIndex: 1000,
+					pointerEvents: 'none',
 				});
 				document.body.appendChild(toast);
 				setTimeout(() => toast.remove(), 1500);
@@ -155,7 +156,7 @@
 		<button id="copy_url">Copy <i>Data URL</i></button>(<kbd>Alt</kbd><kbd>D</kbd>)
 		<button id="copy_script">Copy loader script</button>(<kbd>Alt</kbd><kbd>S</kbd>)
 	</div>
-	<div id="dropZone">Paste an image here (Ctrl+V)</div>
+	<div id="dropZone">Paste an image here (<kbd>Ctrl</kbd><kbd>V</kbd>)</div>
 	<h2>Data URL</h2>
 	<code id="data_url_bin"></code>
 	<h2>EcmaScript</h2>
