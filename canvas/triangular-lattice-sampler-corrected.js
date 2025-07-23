@@ -41,8 +41,8 @@ const sampler = Bitfield_Image_Sampler.from_string('16,16,AAAAAAAAAAAAAA4AEQDx/x
 
 const s = 0.08;
 for (let y = -10; y < 10; y++) {
-    const xo = y & 1 ? s * .5 : 0;
-    const sxo = 0;
+    const xo = y & 1 ? -0.5*s : 0;
+    const sxo = (y >> 1);
     //const sxo = y & 1 ? 1 : 0;
 	for (let x = -10; x < 10; x++) {
 		const p0 = [xo + (x + .5) * s, y * s];
