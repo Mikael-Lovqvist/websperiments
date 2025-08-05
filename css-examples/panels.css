@@ -1,0 +1,25 @@
+.panel-container {
+  display: grid;
+  grid-template-columns: 0em 1fr 0em;
+  transition: grid-template-columns 0.3s ease;
+  height: 100vh;
+}
+
+
+.side-panel {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.left-panel {
+  border-right: 1px solid #444;
+}
+
+.right-panel {
+  border-left: 1px solid #444;
+}
+
+.center-panel {
+  background: #222;
+  color: white;
+  padding: 1em;
+}

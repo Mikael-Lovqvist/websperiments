@@ -1,0 +1,60 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+.viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background: #111;
+  color: white;
+  font-family: sans-serif;
+  overflow: hidden;
+}
+
+/* Generic overlay base */
+.overlay {
+  position: absolute;
+  padding: 0.5em 1em;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 0.5em;
+  user-select: none;
+  cursor: pointer;
+}
+
+/* Corners */
+.top-left {
+  top: 1em; left: 1em;
+}
+.top-right {
+  top: 1em; right: 1em;
+}
+.bottom-left {
+  bottom: 1em; left: 1em;
+}
+.bottom-right {
+  bottom: 1em; right: 1em;
+}
+
+/* Edges */
+.top-center {
+  top: 1em; left: 50%; transform: translateX(-50%);
+}
+.bottom-center {
+  bottom: 1em; left: 50%; transform: translateX(-50%);
+}
+.left-center {
+  left: 1em; top: 50%; transform: translateY(-50%);
+}
+.right-center {
+  right: 1em; top: 50%; transform: translateY(-50%);
+}
+
+/* Center */
+.center {
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+}

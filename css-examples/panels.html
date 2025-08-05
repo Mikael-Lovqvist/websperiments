@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<title>Insets</title>
+	<link rel="stylesheet" href="insets.css">
+	<link rel="stylesheet" href="panels.css">
+	<style>
+		.ccw-rotated {
+			transform: rotate(-0.25turn) translate(0,-3.5em);
+		}
+		.cw-rotated {
+			transform: rotate(0.25turn) translate(0,-3.0em);	/* I don't like that I have to do an translation here, especially not assymetrically like this */
+
+		}
+
+	</style>
+	<script>
+		document.addEventListener('DOMContentLoaded', () => {
+			const pc = document.getElementById('pc');
+			const lp = document.getElementById('lp');
+			const rp = document.getElementById('rp');
+			let lp_open = false;
+			let rp_open = false;
+			document.getElementById('mm').addEventListener('click', (e) => {
+				lp_open = !lp_open;
+
+				const left = lp_open ? '20' : '0';
+				const right = rp_open ? '20' : '0';
+				pc.style.gridTemplateColumns = `${left}em 1fr ${right}em`;
+
+			});
+			document.getElementById('tb').addEventListener('click', (e) => {
+				rp_open = !rp_open;
+
+				const left = lp_open ? '20' : '0';
+				const right = rp_open ? '20' : '0';
+				pc.style.gridTemplateColumns = `${left}em 1fr ${right}em`;
+			});
+		});
+	</script>
+
+</head>
+<body>
+
+
+
+<div class="viewport">
+	<div class="panel-container" id="pc">
+		<div class="side-panel left-panel" id="lp">
+			<div style="width: 20em;">Left panel</div>
+		</div>
+		<div class="viewport">
+			<div class="center-panel">
+				Here be the main content
+			</div>
+			<div class="overlay left-center ccw-rotated" id="mm">Main Menu</div>
+			<div class="overlay right-center cw-rotated" id="tb">Tool Box</div>
+		</div>
+		<div class="side-panel right-panel" id="rp">
+			<div style="width: 20em;">Right panel</div>
+		</div>
+	</div>
+</div>
+
+
+</body>
+</html>
