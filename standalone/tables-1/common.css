@@ -1,0 +1,50 @@
+body {
+	background-color: #224;
+	--table-border-color: #467;
+}
+
+table {
+	background-color: #aad;
+	min-width: 1em;
+	min-height: 1em;
+	border-collapse: collapse;
+}
+
+table td ol {
+	margin: 0em 0.5em;
+	padding-left: 1em;
+}
+
+table td ol li {
+	font-style: italic;
+}
+
+table th {
+	min-width: 1em;
+	padding: 0em 0.5em;
+}
+
+table thead th:nth-child(n+2) {
+	border-left: 3px solid var(--table-border-color);
+}
+
+table tbody th {
+	text-align: right;
+}
+
+table thead tr {
+	border-bottom: 3px solid var(--table-border-color);
+}
+
+table tbody tr:nth-last-child(n+2) {
+	border-bottom: 1px solid var(--table-border-color);
+}
+
+table td {
+	padding: 0em 0.5em;
+	border-left: 1px solid var(--table-border-color);
+}
+
+table th, table td {
+	vertical-align: top;
+}

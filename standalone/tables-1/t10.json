@@ -1,0 +1,123 @@
+[
+  {
+    "planet": "Zebulon V",
+    "atmosphere": "Methane-rich",
+    "temperature": {
+      "value": -120,
+      "unit": "C"
+    },
+    "population": 0,
+    "notes": [
+      "Uninhabitable, but stunning purple clouds"
+    ]
+  },
+  {
+    "planet": "Arcturus Prime",
+    "atmosphere": "Oxygen-Nitrogen",
+    "temperature": {
+      "value": 22,
+      "unit": "C"
+    },
+    "population": 4300000,
+    "notes": [
+      "Peaceful and highly advanced civilization",
+      "Systems main exporter of misery"
+    ]
+  },
+  {
+    "planet": "Draconis IX",
+    "atmosphere": "Carbon Dioxide",
+    "temperature": {
+      "value": 480,
+      "unit": "C"
+    },
+    "population": 0,
+    "notes": [
+      "Volcanic activity off the charts"
+    ]
+  },
+  {
+    "planet": "Elara",
+    "atmosphere": "Thin Oxygen",
+    "temperature": {
+      "value": -30,
+      "unit": "C"
+    },
+    "population": 1200,
+    "notes": [
+      "Small scientific outpost"
+    ]
+  },
+  {
+    "planet": "Nova Terra",
+    "atmosphere": "Oxygen-Nitrogen",
+    "temperature": {
+      "value": 16,
+      "unit": "C"
+    },
+    "population": 15000000,
+    "notes": [
+      "Primary human colony"
+    ]
+  },
+  {
+    "planet": "Thalos",
+    "atmosphere": "Sulfuric",
+    "temperature": {
+      "value": 300,
+      "unit": "C"
+    },
+    "population": 0,
+    "notes": [
+      "Extreme weather makes landings risky"
+    ]
+  },
+  {
+    "planet": "Minerva",
+    "atmosphere": "Oxygen-rich",
+    "temperature": {
+      "value": 10,
+      "unit": "C"
+    },
+    "population": 85000,
+    "notes": [
+      "Home to rare crystal-based lifeforms"
+    ]
+  },
+  {
+    "planet": "Oberon Station",
+    "atmosphere": "Artificial",
+    "temperature": {
+      "value": 21,
+      "unit": "C"
+    },
+    "population": 560,
+    "notes": [
+      "Space station orbiting gas giant"
+    ]
+  },
+  {
+    "planet": "Xentari Alpha",
+    "atmosphere": "Ammonia",
+    "temperature": {
+      "value": -80,
+      "unit": "C"
+    },
+    "population": 0,
+    "notes": [
+      "Strange magnetic fields"
+    ]
+  },
+  {
+    "planet": "Helios Gate",
+    "atmosphere": "Plasma storms",
+    "temperature": {
+      "value": 1500,
+      "unit": "C"
+    },
+    "population": 0,
+    "notes": [
+      "Suspected to be a wormhole source"
+    ]
+  }
+]
