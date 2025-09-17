@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>WebGL Cube Lines (MVP in Shader)</title>
+<style>
+	body, html {
+		padding: 0;
+		margin: 0;
+	}
+	canvas {
+		width: 100vw;
+		height: 100vh;
+		display: block;
+	}
+</style>
+<script>
+const vsSource = `
+attribute vec3 aPos;
+uniform mat4 uProjection;
+uniform mat4 uView;
+uniform vec3 uDir;
+
+mat4 rotationY(float a) {
+		float c = cos(a);
+		float s = sin(a);
+		return mat4(
+				c,  0.0,  s, 0.0,
+				0.0,1.0, 0.0,0.0,
+			 -s,  0.0,  c, 0.0,
+				0.0,0.0, 0.0,1.0
+		);
+}
+
+// Input: n is normalized
+void makeBasis(in vec3 n, out vec3 b1, out vec3 b2) {
+    if (n.z < -0.9999999) {
+        // special case: n ~ (0,0,-1)
+        b1 = vec3(0.0, -1.0, 0.0);
+        b2 = vec3(-1.0, 0.0, 0.0);
+    } else {
+        float a = 1.0 / (1.0 + n.z);
+        float b = -n.x * n.y * a;
+        b1 = vec3(1.0 - n.x*n.x*a, b, -n.x);
+        b2 = vec3(b, 1.0 - n.y*n.y*a, -n.y);
+    }
+}
+
+mat4 basisFromDir(vec3 dir) {
+    vec3 b1, b2;
+    makeBasis(normalize(dir), b1, b2);
+    vec3 f = normalize(dir);
+    return mat4(
+        b1.x, b2.x, f.x, 0.0,
+        b1.y, b2.y, f.y, 0.0,
+        b1.z, b2.z, f.z, 0.0,
+        0.0,  0.0,  0.0, 1.0
+    );
+}
+
+
+void main() {
+		gl_Position = uProjection * uView * basisFromDir(uDir) * vec4(aPos, 1.0);
+}
+
+
+`;
+const fsSource = `
+precision mediump float;
+void main() {
+	gl_FragColor = vec4(0.0, 0.8, 1.0, 1.0);
+}`;
+
+
+
+
+function start_app() {
+	const canvas = document.getElementById("glcanvas");
+	const gl = canvas.getContext("webgl");
+
+	const resize = () => {
+		const w = canvas.clientWidth;
+		const h = canvas.clientHeight;
+		if (canvas.width !== w || canvas.height !== h) {
+			canvas.width = w;
+			canvas.height = h;
+		}
+	};
+	const ro = new ResizeObserver(resize);
+	ro.observe(canvas);
+	resize(); // initial setup
+
+
+	function compile(type, src) {
+		const s = gl.createShader(type);
+		gl.shaderSource(s, src);
+		gl.compileShader(s);
+		if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
+			throw gl.getShaderInfoLog(s);
+		return s;
+	}
+	const vs = compile(gl.VERTEX_SHADER, vsSource);
+	const fs = compile(gl.FRAGMENT_SHADER, fsSource);
+	const prog = gl.createProgram();
+	gl.attachShader(prog, vs);
+	gl.attachShader(prog, fs);
+	gl.linkProgram(prog);
+	if (!gl.getProgramParameter(prog, gl.LINK_STATUS))
+		throw gl.getProgramInfoLog(prog);
+	gl.useProgram(prog);
+
+	const verts = new Float32Array([
+		-1,-1,-1,  1,-1,-1,
+		 1,-1,-1,  1, 1,-1,
+		 1, 1,-1, -1, 1,-1,
+		-1, 1,-1, -1,-1,-1,
+		-1,-1, 1,  1,-1, 1,
+		 1,-1, 1,  1, 1, 1,
+		 1, 1, 1, -1, 1, 1,
+		-1, 1, 1, -1,-1, 1,
+		-1,-1,-1, -1,-1, 1,
+		 1,-1,-1,  1,-1, 1,
+		 1, 1,-1,  1, 1, 1,
+		-1, 1,-1, -1, 1, 1
+	]);
+	const vbo = gl.createBuffer();
+	gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+	gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+	const aPos = gl.getAttribLocation(prog, "aPos");
+	gl.enableVertexAttribArray(aPos);
+	gl.vertexAttribPointer(aPos, 3, gl.FLOAT, false, 0, 0);
+
+	function perspective(fovy, aspect, near, far) {
+		const f = 1 / Math.tan(fovy/2);
+		const nf = 1 / (near - far);
+		return new Float32Array([
+			f/aspect, 0, 0, 0,
+			0, f, 0, 0,
+			0, 0, (far+near)*nf, -1,
+			0, 0, (2*far*near)*nf, 0
+		]);
+	}
+	function translateZ(z) {
+		return new Float32Array([
+			1,0,0,0,
+			0,1,0,0,
+			0,0,1,0,
+			0,0,z,1
+		]);
+	}
+
+	const proj = perspective(Math.PI/3, canvas.width/canvas.height, 0.1, 100);
+	const view = translateZ(-6);
+
+	const uProjection = gl.getUniformLocation(prog, "uProjection");
+	const uView = gl.getUniformLocation(prog, "uView");
+	const uDir = gl.getUniformLocation(prog, "uDir");
+	gl.uniformMatrix4fv(uProjection, false, proj);
+	gl.uniformMatrix4fv(uView, false, view);
+
+
+	let uDirData = [0, 0, 1];
+
+
+	if (window.GravitySensor) {
+		const acl = new GravitySensor({ frequency: 60 });
+		acl.addEventListener("reading", (e) => {
+			const {x, y, z} = acl;
+			const s = 1 / (Math.sqrt(x**2 + y**2 + z**2));
+			uDirData = [-s*x, -s*y, s*z];
+		});
+		acl.start();
+	}
+
+	function draw() {
+
+		const w = canvas.width;
+		const h = canvas.height;
+
+		gl.viewport(0, 0, w, h);
+		const proj = perspective(Math.PI/3, w/h, 0.1, 100);
+		gl.uniformMatrix4fv(uProjection, false, proj);
+
+		gl.uniform3f(uDir, ...uDirData);
+		gl.clearColor(0,0,0,1);
+		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+		gl.enable(gl.DEPTH_TEST);
+		gl.drawArrays(gl.LINES, 0, verts.length/3);
+		window.requestAnimationFrame(draw);
+	}
+
+
+
+	window.requestAnimationFrame(draw);
+
+}
+
+document.addEventListener("DOMContentLoaded", start_app);
+</script>
+</head>
+<body>
+<canvas id="glcanvas" width="600" height="400"></canvas>
+</body>
+</html>
