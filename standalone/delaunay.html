@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width,initial-scale=1" />
+	<title>Delaunay (Bowyer–Watson) on Canvas</title>
+	<style>
+		html, body {
+			height: 100%;
+			margin: 0;
+			background: #111;
+			color: #ddd;
+			font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+		}
+		#wrap {
+			display: grid;
+			grid-template-rows: auto 1fr;
+			height: 100%;
+		}
+		#bar {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 10px;
+			align-items: center;
+			padding: 10px 12px;
+			background: #1a1a1a;
+			border-bottom: 1px solid #2a2a2a;
+		}
+		#bar > * { margin: 0; }
+		label {
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+			white-space: nowrap;
+		}
+		input[type="range"] { width: 220px; }
+		button {
+			background: #2a2a2a;
+			color: #ddd;
+			border: 1px solid #3a3a3a;
+			padding: 7px 10px;
+			border-radius: 6px;
+			cursor: pointer;
+		}
+		button:hover { background: #333; }
+		button:disabled { opacity: .5; cursor: default; }
+		.small {
+			font-size: 12px;
+			opacity: .85;
+		}
+		#c {
+			display: block;
+			width: 100%;
+			height: 100%;
+		}
+	</style>
+</head>
+<body>
+<div id="wrap">
+	<div id="bar">
+		<label>
+			N
+			<input id="n" type="range" min="10" max="600" value="120" />
+			<span id="nVal">120</span>
+		</label>
+
+		<button id="regen">Regenerate points</button>
+		<button id="solve">Solve (one go)</button>
+
+		<label>
+			<input id="animate" type="checkbox" checked />
+			Animate
+		</label>
+
+		<label>
+			Step ms
+			<input id="stepMs" type="range" min="0" max="200" value="12" />
+			<span id="stepMsVal">12</span>
+		</label>
+
+		<button id="run" title="Start/stop animation">Start</button>
+
+		<span class="small" id="status"></span>
+	</div>
+
+	<canvas id="c"></canvas>
+</div>
+
+<script>
+(() => {
+	"use strict";
+
+	// ----------------------------
+	// Canvas + UI
+	// ----------------------------
+	const canvas = document.getElementById("c");
+	const ctx = canvas.getContext("2d", { alpha: false });
+
+	const nSlider = document.getElementById("n");
+	const nVal = document.getElementById("nVal");
+	const regenBtn = document.getElementById("regen");
+	const solveBtn = document.getElementById("solve");
+	const animateChk = document.getElementById("animate");
+	const stepMs = document.getElementById("stepMs");
+	const stepMsVal = document.getElementById("stepMsVal");
+	const runBtn = document.getElementById("run");
+	const statusEl = document.getElementById("status");
+
+	let W = 0, H = 0, DPR = 1;
+
+	function resize() {
+		const rect = canvas.getBoundingClientRect();
+		DPR = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+		W = Math.max(1, Math.floor(rect.width));
+		H = Math.max(1, Math.floor(rect.height));
+		canvas.width = W * DPR;
+		canvas.height = H * DPR;
+		ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+		draw();
+	}
+	window.addEventListener("resize", resize);
+
+	nSlider.addEventListener("input", () => {
+		nVal.textContent = nSlider.value;
+	});
+
+	stepMs.addEventListener("input", () => {
+		stepMsVal.textContent = stepMs.value;
+	});
+
+	// ----------------------------
+	// Geometry helpers
+	// ----------------------------
+	function orient2d(a, b, c) {
+		// Positive if a->b->c is counter-clockwise
+		return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+	}
+
+	function circumcircleContains(a, b, c, p) {
+		// Robust-enough incircle test for typical canvas demos:
+		// Uses determinant form; assumes triangle (a,b,c) is CCW.
+		const ax = a.x - p.x;
+		const ay = a.y - p.y;
+		const bx = b.x - p.x;
+		const by = b.y - p.y;
+		const cx = c.x - p.x;
+		const cy = c.y - p.y;
+
+		const a2 = ax * ax + ay * ay;
+		const b2 = bx * bx + by * by;
+		const c2 = cx * cx + cy * cy;
+
+		const det =
+			ax * (by * c2 - b2 * cy) -
+			ay * (bx * c2 - b2 * cx) +
+			a2 * (bx * cy - by * cx);
+
+		// For CCW triangle, det > 0 means p is inside circumcircle.
+		// Small epsilon to reduce flicker on nearly co-circular sets.
+		return det > 1e-10;
+	}
+
+	function triKey(i, j) {
+		return i < j ? (i + "," + j) : (j + "," + i);
+	}
+
+	// ----------------------------
+	// Bowyer–Watson incremental state
+	// ----------------------------
+	let points = [];
+	let triangles = []; // each {a,b,c} indices into points
+	let superIds = null; // [sa,sb,sc]
+	let insertOrder = [];
+	let insertIndex = 0;
+
+	let isRunning = false;
+	let lastStepTime = 0;
+
+	function makeRandomPoints(n) {
+		const margin = 24;
+		const pts = [];
+		for (let i = 0; i < n; i++) {
+			pts.push({
+				x: margin + Math.random() * (W - 2 * margin),
+				y: margin + Math.random() * (H - 2 * margin),
+				isSuper: false
+			});
+		}
+		return pts;
+	}
+
+	function initTriangulation() {
+		const n = Number(nSlider.value);
+
+		points = makeRandomPoints(n);
+
+		// Build a super-triangle that contains the canvas comfortably.
+		// Big triangle around center, scaled by max dimension.
+		const cx = W * 0.5;
+		const cy = H * 0.5;
+		const s = Math.max(W, H) * 10;
+
+		const sa = points.length;
+		points.push({ x: cx - 2 * s, y: cy + s, isSuper: true });
+		const sb = points.length;
+		points.push({ x: cx, y: cy - 2 * s, isSuper: true });
+		const sc = points.length;
+		points.push({ x: cx + 2 * s, y: cy + s, isSuper: true });
+
+		superIds = [sa, sb, sc];
+
+		// Ensure CCW order for the super triangle
+		if (orient2d(points[sa], points[sb], points[sc]) < 0) {
+			// swap sb and sc
+			superIds = [sa, sc, sb];
+		}
+
+		triangles = [{
+			a: superIds[0],
+			b: superIds[1],
+			c: superIds[2]
+		}];
+
+		// Insert points in random order for a nicer incremental animation
+		insertOrder = [];
+		for (let i = 0; i < n; i++) insertOrder.push(i);
+		for (let i = insertOrder.length - 1; i > 0; i--) {
+			const j = (Math.random() * (i + 1)) | 0;
+			const t = insertOrder[i];
+			insertOrder[i] = insertOrder[j];
+			insertOrder[j] = t;
+		}
+		insertIndex = 0;
+
+		updateStatus();
+		draw();
+	}
+
+	function stepInsertOnePoint() {
+		if (insertIndex >= insertOrder.length) return false;
+
+		const pIndex = insertOrder[insertIndex++];
+		const p = points[pIndex];
+
+		// 1) Find "bad" triangles whose circumcircle contains p
+		const bad = [];
+		for (let t = 0; t < triangles.length; t++) {
+			const tri = triangles[t];
+			const a = points[tri.a], b = points[tri.b], c = points[tri.c];
+
+			// Ensure CCW for the incircle test
+			let ia = tri.a, ib = tri.b, ic = tri.c;
+			if (orient2d(a, b, c) < 0) {
+				// Swap two vertices to make it CCW
+				ib = tri.c;
+				ic = tri.b;
+			}
+
+			const aa = points[ia], bb = points[ib], cc = points[ic];
+			if (circumcircleContains(aa, bb, cc, p)) {
+				bad.push(t);
+			}
+		}
+
+		// 2) Find boundary edges of the polygonal hole
+		// Count edges from bad triangles; boundary edges are those that appear once.
+		const edgeCount = new Map(); // key "i,j" -> {i,j,count}
+		for (let k = 0; k < bad.length; k++) {
+			const tri = triangles[bad[k]];
+			const e1 = triKey(tri.a, tri.b);
+			const e2 = triKey(tri.b, tri.c);
+			const e3 = triKey(tri.c, tri.a);
+
+			for (const [key, i, j] of [
+				[e1, tri.a, tri.b],
+				[e2, tri.b, tri.c],
+				[e3, tri.c, tri.a]
+			]) {
+				const cur = edgeCount.get(key);
+				if (cur) cur.count++;
+				else edgeCount.set(key, { i, j, count: 1 });
+			}
+		}
+
+		const boundaryEdges = [];
+		for (const e of edgeCount.values()) {
+			if (e.count === 1) boundaryEdges.push({ i: e.i, j: e.j });
+		}
+
+		// 3) Remove bad triangles (remove in descending index order)
+		bad.sort((x, y) => y - x);
+		for (let k = 0; k < bad.length; k++) {
+			triangles.splice(bad[k], 1);
+		}
+
+		// 4) Re-triangulate the hole by connecting p to each boundary edge
+		for (let e = 0; e < boundaryEdges.length; e++) {
+			const i = boundaryEdges[e].i;
+			const j = boundaryEdges[e].j;
+
+			// Make triangle (i, j, pIndex) CCW
+			const A = points[i], B = points[j], C = p;
+			if (orient2d(A, B, C) > 0) {
+				triangles.push({ a: i, b: j, c: pIndex });
+			} else {
+				triangles.push({ a: j, b: i, c: pIndex });
+			}
+		}
+
+		return true;
+	}
+
+	function finalizeRemoveSuperTriangle() {
+		if (!superIds) return;
+
+		const s0 = superIds[0], s1 = superIds[1], s2 = superIds[2];
+		triangles = triangles.filter(t => t.a !== s0 && t.a !== s1 && t.a !== s2 &&
+										  t.b !== s0 && t.b !== s1 && t.b !== s2 &&
+										  t.c !== s0 && t.c !== s1 && t.c !== s2);
+
+		updateStatus();
+		draw();
+	}
+
+	function solveAll() {
+		while (insertIndex < insertOrder.length) {
+			stepInsertOnePoint();
+		}
+		finalizeRemoveSuperTriangle();
+	}
+
+	// ----------------------------
+	// Drawing
+	// ----------------------------
+	function draw() {
+		// Background
+		ctx.fillStyle = "#111";
+		ctx.fillRect(0, 0, W, H);
+
+		// Triangles
+		ctx.lineWidth = 1;
+
+		ctx.strokeStyle = "rgba(190,190,190,0.65)";
+		ctx.beginPath();
+		for (let t = 0; t < triangles.length; t++) {
+			const tri = triangles[t];
+			const a = points[tri.a];
+			const b = points[tri.b];
+			const c = points[tri.c];
+
+			// Optionally hide super triangle edges during build for clarity
+			if (a.isSuper || b.isSuper || c.isSuper) continue;
+
+			ctx.moveTo(a.x, a.y);
+			ctx.lineTo(b.x, b.y);
+			ctx.lineTo(c.x, c.y);
+			ctx.lineTo(a.x, a.y);
+		}
+		ctx.stroke();
+
+		// Points
+		for (let i = 0; i < points.length; i++) {
+			const p = points[i];
+			if (p.isSuper) continue;
+
+			ctx.fillStyle = "#ddd";
+			ctx.beginPath();
+			ctx.arc(p.x, p.y, 2.2, 0, Math.PI * 2);
+			ctx.fill();
+		}
+
+		// Current insertion point highlight
+		if (insertIndex < insertOrder.length) {
+			const idx = insertOrder[insertIndex];
+			const p = points[idx];
+			ctx.strokeStyle = "rgba(255,255,255,0.9)";
+			ctx.lineWidth = 2;
+			ctx.beginPath();
+			ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+			ctx.stroke();
+			ctx.lineWidth = 1;
+		}
+	}
+
+	function updateStatus() {
+		const n = Number(nSlider.value);
+		const inserted = Math.min(insertIndex, n);
+		const done = (insertIndex >= n);
+		statusEl.textContent = done
+			? `done: points ${n}, triangles ${triangles.length}`
+			: `inserting: ${inserted}/${n}, triangles ${triangles.length}`;
+	}
+
+	// ----------------------------
+	// Animation loop
+	// ----------------------------
+	function tick(ts) {
+		if (!isRunning) return;
+
+		const ms = Number(stepMs.value);
+		const ready = (ms === 0) ? true : (ts - lastStepTime >= ms);
+
+		if (ready) {
+			lastStepTime = ts;
+
+			const progressed = stepInsertOnePoint();
+			updateStatus();
+			draw();
+
+			if (!progressed) {
+				finalizeRemoveSuperTriangle();
+				isRunning = false;
+				runBtn.textContent = "Start";
+				solveBtn.disabled = false;
+				regenBtn.disabled = false;
+				nSlider.disabled = false;
+				animateChk.disabled = false;
+			}
+		}
+
+		requestAnimationFrame(tick);
+	}
+
+	function startStop() {
+		if (!animateChk.checked) return;
+
+		if (!isRunning) {
+			isRunning = true;
+			lastStepTime = 0;
+			runBtn.textContent = "Stop";
+			solveBtn.disabled = true;
+			regenBtn.disabled = true;
+			nSlider.disabled = true;
+			animateChk.disabled = true;
+			requestAnimationFrame(tick);
+		} else {
+			isRunning = false;
+			runBtn.textContent = "Start";
+			solveBtn.disabled = false;
+			regenBtn.disabled = false;
+			nSlider.disabled = false;
+			animateChk.disabled = false;
+			updateStatus();
+			draw();
+		}
+	}
+
+	// ----------------------------
+	// UI handlers
+	// ----------------------------
+	regenBtn.addEventListener("click", () => {
+		isRunning = false;
+		runBtn.textContent = "Start";
+		solveBtn.disabled = false;
+		regenBtn.disabled = false;
+		nSlider.disabled = false;
+		animateChk.disabled = false;
+
+		initTriangulation();
+	});
+
+	solveBtn.addEventListener("click", () => {
+		isRunning = false;
+		runBtn.textContent = "Start";
+		solveAll();
+	});
+
+	runBtn.addEventListener("click", () => {
+		startStop();
+	});
+
+	animateChk.addEventListener("change", () => {
+		if (!animateChk.checked) {
+			isRunning = false;
+			runBtn.textContent = "Start";
+			runBtn.disabled = true;
+		} else {
+			runBtn.disabled = false;
+		}
+	});
+
+	// Click to add a point (optional quick test)
+	canvas.addEventListener("pointerdown", (e) => {
+		// Only allow adding points when not running and before solving is complete.
+		if (isRunning) return;
+		const n = Number(nSlider.value);
+		if (insertIndex >= insertOrder.length) return;
+
+		const rect = canvas.getBoundingClientRect();
+		const x = e.clientX - rect.left;
+		const y = e.clientY - rect.top;
+
+		// Replace next-to-insert random point with clicked position for quick experimentation
+		const idx = insertOrder[insertIndex];
+		points[idx].x = x;
+		points[idx].y = y;
+
+		draw();
+	});
+
+	function boot() {
+		nVal.textContent = nSlider.value;
+		stepMsVal.textContent = stepMs.value;
+		runBtn.disabled = !animateChk.checked;
+
+		resize();
+		initTriangulation();
+		updateStatus();
+		draw();
+	}
+
+	boot();
+})();
+</script>
+</body>
+</html>
