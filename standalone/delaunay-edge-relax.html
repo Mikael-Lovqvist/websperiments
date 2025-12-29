@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width,initial-scale=1" />
+	<title>Delaunay + Planarity Back-Pressure Relaxation</title>
+	<style>
+		html, body {
+			height: 100%;
+			margin: 0;
+			background: #111;
+			color: #ddd;
+			font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+		}
+		#wrap {
+			display: grid;
+			grid-template-rows: auto 1fr;
+			height: 100%;
+		}
+		#bar {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 10px 14px;
+			align-items: center;
+			padding: 10px 12px;
+			background: #1a1a1a;
+			border-bottom: 1px solid #2a2a2a;
+		}
+		label { display: inline-flex; gap: 8px; align-items: center; white-space: nowrap; }
+		input[type="range"] { width: 220px; }
+		button {
+			background: #2a2a2a;
+			color: #ddd;
+			border: 1px solid #3a3a3a;
+			padding: 7px 10px;
+			border-radius: 6px;
+			cursor: pointer;
+		}
+		button:hover { background: #333; }
+		.small { font-size: 12px; opacity: .85; }
+		#c { display: block; width: 100%; height: 100%; }
+	</style>
+</head>
+<body>
+<div id="wrap">
+	<div id="bar">
+		<label>
+			N
+			<input id="n" type="range" min="10" max="600" value="180" />
+			<span id="nVal">180</span>
+		</label>
+
+		<button id="regen">Regenerate + Solve Delaunay</button>
+
+		<label>
+			Free force
+			<input id="freeK" type="range" min="0" max="200" value="55" />
+			<span id="freeKVal">0.055</span>
+		</label>
+
+		<label>
+			Crossing bias
+			<input id="crossB" type="range" min="0" max="400" value="220" />
+			<span id="crossBVal">2.20</span>
+		</label>
+
+		<label>
+			Steps/frame
+			<input id="steps" type="range" min="1" max="60" value="18" />
+			<span id="stepsVal">18</span>
+		</label>
+
+		<label>
+			Step scalar
+			<input id="alpha" type="range" min="1" max="200" value="55" />
+			<span id="alphaVal">0.055</span>
+		</label>
+
+		<span class="small" id="info"></span>
+	</div>
+	<canvas id="c"></canvas>
+</div>
+
+<script>
+(() => {
+	"use strict";
+
+	// ----------------------------
+	// Canvas
+	// ----------------------------
+	const canvas = document.getElementById("c");
+	const ctx = canvas.getContext("2d", { alpha: false });
+
+	let W = 0, H = 0, DPR = 1;
+
+	function resize() {
+		const r = canvas.getBoundingClientRect();
+		DPR = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+		W = Math.max(1, r.width | 0);
+		H = Math.max(1, r.height | 0);
+		canvas.width = W * DPR;
+		canvas.height = H * DPR;
+		ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+	}
+	window.addEventListener("resize", resize);
+
+	// ----------------------------
+	// UI
+	// ----------------------------
+	const nSlider = document.getElementById("n");
+	const nVal = document.getElementById("nVal");
+	const regenBtn = document.getElementById("regen");
+
+	const freeK = document.getElementById("freeK");
+	const freeKVal = document.getElementById("freeKVal");
+
+	const crossB = document.getElementById("crossB");
+	const crossBVal = document.getElementById("crossBVal");
+
+	const steps = document.getElementById("steps");
+	const stepsVal = document.getElementById("stepsVal");
+
+	const alpha = document.getElementById("alpha");
+	const alphaVal = document.getElementById("alphaVal");
+
+	const info = document.getElementById("info");
+
+	function updateUiText() {
+		nVal.textContent = nSlider.value;
+		freeKVal.textContent = (Number(freeK.value) / 1000).toFixed(3);
+		crossBVal.textContent = (Number(crossB.value) / 100).toFixed(2);
+		stepsVal.textContent = steps.value;
+		alphaVal.textContent = (Number(alpha.value) / 1000).toFixed(3);
+	}
+	nSlider.addEventListener("input", updateUiText);
+	freeK.addEventListener("input", updateUiText);
+	crossB.addEventListener("input", updateUiText);
+	steps.addEventListener("input", updateUiText);
+	alpha.addEventListener("input", updateUiText);
+
+	// ----------------------------
+	// Geometry helpers
+	// ----------------------------
+	function orient(a, b, c) {
+		return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+	}
+
+	function circumcircleContains(a, b, c, p) {
+		// Determinant incircle test; expects a,b,c CCW.
+		const ax = a.x - p.x, ay = a.y - p.y;
+		const bx = b.x - p.x, by = b.y - p.y;
+		const cx = c.x - p.x, cy = c.y - p.y;
+
+		const a2 = ax * ax + ay * ay;
+		const b2 = bx * bx + by * by;
+		const c2 = cx * cx + cy * cy;
+
+		const det =
+			ax * (by * c2 - b2 * cy) -
+			ay * (bx * c2 - b2 * cx) +
+			a2 * (bx * cy - by * cx);
+
+		return det > 1e-10;
+	}
+
+	function edgeKey(i, j) {
+		return i < j ? (i + "," + j) : (j + "," + i);
+	}
+
+	function segIntersectParams(ax, ay, bx, by, cx, cy, dx, dy) {
+		// Returns {hit,t,u,ix,iy} for proper intersection (not touching/endpoints/collinear).
+		const rpx = bx - ax, rpy = by - ay;
+		const spx = dx - cx, spy = dy - cy;
+
+		const denom = rpx * spy - rpy * spx;
+		if (Math.abs(denom) < 1e-12) return null; // parallel or collinear
+
+		const qpx = cx - ax, qpy = cy - ay;
+
+		const t = (qpx * spy - qpy * spx) / denom;
+		const u = (qpx * rpy - qpy * rpx) / denom;
+
+		// Strict interior intersection to avoid fighting at shared endpoints.
+		if (t <= 1e-6 || t >= 1 - 1e-6 || u <= 1e-6 || u >= 1 - 1e-6) return null;
+
+		return {
+			t,
+			u,
+			ix: ax + t * rpx,
+			iy: ay + t * rpy
+		};
+	}
+
+	// ----------------------------
+	// Delaunay (Bowyer–Watson, one-shot)
+	// ----------------------------
+	let points = [];
+	let triangles = [];
+	let edges = [];
+	let edgePairs = []; // convenience array of {i,j}
+	let superCount = 0;
+
+	function solveDelaunay(pts) {
+		points = pts;
+		triangles = [];
+		edges = [];
+		edgePairs = [];
+
+		const cx = W * 0.5;
+		const cy = H * 0.5;
+		const s = Math.max(W, H) * 10;
+
+		const sa = points.length;
+		points.push({ x: cx - 2 * s, y: cy + s, super: true });
+		const sb = points.length;
+		points.push({ x: cx, y: cy - 2 * s, super: true });
+		const sc = points.length;
+		points.push({ x: cx + 2 * s, y: cy + s, super: true });
+
+		superCount = 3;
+
+		// Ensure CCW for super triangle
+		if (orient(points[sa], points[sb], points[sc]) < 0) {
+			const tmp = points[sb];
+			points[sb] = points[sc];
+			points[sc] = tmp;
+		}
+
+		triangles.push({ a: sa, b: sb, c: sc });
+
+		const realN = pts.length;
+
+		for (let pi = 0; pi < realN; pi++) {
+			const p = points[pi];
+
+			const bad = [];
+			for (let ti = 0; ti < triangles.length; ti++) {
+				const t = triangles[ti];
+				let A = points[t.a], B = points[t.b], C = points[t.c];
+				// enforce CCW for incircle test
+				if (orient(A, B, C) < 0) {
+					const tmp = B; B = C; C = tmp;
+				}
+				if (circumcircleContains(A, B, C, p)) bad.push(ti);
+			}
+
+			const ec = new Map();
+			for (let k = 0; k < bad.length; k++) {
+				const t = triangles[bad[k]];
+				const k1 = edgeKey(t.a, t.b);
+				const k2 = edgeKey(t.b, t.c);
+				const k3 = edgeKey(t.c, t.a);
+				ec.set(k1, (ec.get(k1) || 0) + 1);
+				ec.set(k2, (ec.get(k2) || 0) + 1);
+				ec.set(k3, (ec.get(k3) || 0) + 1);
+			}
+
+			bad.sort((a, b) => b - a);
+			for (let k = 0; k < bad.length; k++) triangles.splice(bad[k], 1);
+
+			for (const [k, c] of ec.entries()) {
+				if (c !== 1) continue;
+				const parts = k.split(",");
+				const i = Number(parts[0]);
+				const j = Number(parts[1]);
+
+				// make triangle CCW
+				if (orient(points[i], points[j], p) > 0)
+					triangles.push({ a: i, b: j, c: pi });
+				else
+					triangles.push({ a: j, b: i, c: pi });
+			}
+		}
+
+		// Remove triangles touching super vertices
+		triangles = triangles.filter(t =>
+			!points[t.a].super &&
+			!points[t.b].super &&
+			!points[t.c].super
+		);
+
+		// Build unique edges
+		const es = new Map();
+		for (let ti = 0; ti < triangles.length; ti++) {
+			const t = triangles[ti];
+			for (const [i, j] of [[t.a, t.b], [t.b, t.c], [t.c, t.a]]) {
+				es.set(edgeKey(i, j), { i, j });
+			}
+		}
+		edges = [...es.values()];
+		edgePairs = edges; // alias
+	}
+
+	// ----------------------------
+	// Relaxation with back-pressure constraints
+	// ----------------------------
+	let fx = null;
+	let fy = null;
+
+	function ensureForceArrays() {
+		if (!fx || fx.length !== points.length) {
+			fx = new Float32Array(points.length);
+			fy = new Float32Array(points.length);
+		}
+	}
+
+	function zeroForces() {
+		fx.fill(0);
+		fy.fill(0);
+	}
+
+	function addFreeForces(avgLen, kFree) {
+		// Spring equalization: for each edge, push/pull to match avgLen.
+		for (let ei = 0; ei < edgePairs.length; ei++) {
+			const e = edgePairs[ei];
+			const a = points[e.i];
+			const b = points[e.j];
+
+			let dx = b.x - a.x;
+			let dy = b.y - a.y;
+			let len = Math.hypot(dx, dy) || 1;
+
+			const nx = dx / len;
+			const ny = dy / len;
+
+			// positive when too long -> pull together
+			const delta = (len - avgLen);
+
+			// symmetric force along the edge
+			const f = delta * kFree;
+
+			const fxE = nx * f;
+			const fyE = ny * f;
+
+			fx[e.i] += fxE;
+			fy[e.i] += fyE;
+
+			fx[e.j] -= fxE;
+			fy[e.j] -= fyE;
+		}
+	}
+
+	function addBoundaryForces() {
+		// Soft boundary box: keep points in an inner region (to allow expansion).
+		// Uses weak forces rather than hard clamps.
+		const padX = W * 0.10;
+		const padY = H * 0.10;
+
+		const minX = padX;
+		const maxX = W - padX;
+		const minY = padY;
+		const maxY = H - padY;
+
+		const k = 0.002;
+
+		for (let i = 0; i < points.length; i++) {
+			const p = points[i];
+			if (p.super) continue;
+
+			if (p.x < minX) fx[i] += (minX - p.x) * k;
+			else if (p.x > maxX) fx[i] -= (p.x - maxX) * k;
+
+			if (p.y < minY) fy[i] += (minY - p.y) * k;
+			else if (p.y > maxY) fy[i] -= (p.y - maxY) * k;
+		}
+	}
+
+	function addCrossingBackPressure(bias) {
+		// For every intersecting non-adjacent edge pair:
+		// add forces that push the two segments apart using their normals at the intersection.
+		//
+		// This is a penalty constraint: strong when violated; zero otherwise.
+
+		let crossings = 0;
+
+		const kCross = 0.8 * bias; // base multiplier; bias comes from UI
+
+		for (let i = 0; i < edgePairs.length; i++) {
+			const e1 = edgePairs[i];
+			const a = points[e1.i];
+			const b = points[e1.j];
+
+			const ax = a.x, ay = a.y, bx = b.x, by = b.y;
+
+			for (let j = i + 1; j < edgePairs.length; j++) {
+				const e2 = edgePairs[j];
+
+				// Skip if they share a vertex (adjacent edges are allowed to meet).
+				if (e1.i === e2.i || e1.i === e2.j || e1.j === e2.i || e1.j === e2.j) continue;
+
+				const c = points[e2.i];
+				const d = points[e2.j];
+
+				const hit = segIntersectParams(ax, ay, bx, by, c.x, c.y, d.x, d.y);
+				if (!hit) continue;
+
+				crossings++;
+
+				// Segment directions
+				const r1x = bx - ax, r1y = by - ay;
+				const r2x = d.x - c.x, r2y = d.y - c.y;
+
+				const len1 = Math.hypot(r1x, r1y) || 1;
+				const len2 = Math.hypot(r2x, r2y) || 1;
+
+				// Unit normals (two choices; pick sign via side tests)
+				let n1x = -r1y / len1, n1y = r1x / len1;
+				let n2x = -r2y / len2, n2y = r2x / len2;
+
+				// Determine on which side of e1 the endpoints of e2 lie
+				// (they should be opposite sides for a proper crossing).
+				const s1 = orient(a, b, c);
+				const s2 = orient(a, b, d);
+
+				// Choose n1 direction so that it pushes c and d to opposite sides away from the edge
+				// We want to push e1 endpoints in direction that separates from e2; use c as reference.
+				// If c is "left" (positive), push e1 along +n1; otherwise along -n1.
+				const sign1 = (s1 > 0) ? 1 : -1;
+
+				// Similarly for e2 relative to e1
+				const t1 = orient(c, d, a);
+				const sign2 = (t1 > 0) ? 1 : -1;
+
+				n1x *= sign1; n1y *= sign1;
+				n2x *= sign2; n2y *= sign2;
+
+				// Strength: grow when intersection is near the middle (harder constraint)
+				// and modestly with edge lengths to avoid tiny-edge domination.
+				const midBoost = 1.0 + 2.0 * (0.5 - Math.abs(hit.t - 0.5)) + 2.0 * (0.5 - Math.abs(hit.u - 0.5));
+				const f1 = kCross * midBoost;
+				const f2 = kCross * midBoost;
+
+				// Apply equal & opposite "pressure" to endpoints (symmetric distribution)
+				// e1 endpoints move along its normal
+				fx[e1.i] += n1x * f1;
+				fy[e1.i] += n1y * f1;
+				fx[e1.j] += n1x * f1;
+				fy[e1.j] += n1y * f1;
+
+				// e2 endpoints move along its normal in the opposite direction
+				fx[e2.i] -= n2x * f2;
+				fy[e2.i] -= n2y * f2;
+				fx[e2.j] -= n2x * f2;
+				fy[e2.j] -= n2y * f2;
+
+				// Extra: also push along the other segment's normal (helps untangle faster)
+				// but smaller, to avoid oscillation.
+				const kMix = 0.35 * kCross;
+
+				fx[e1.i] += n2x * kMix;
+				fy[e1.i] += n2y * kMix;
+				fx[e1.j] += n2x * kMix;
+				fy[e1.j] += n2y * kMix;
+
+				fx[e2.i] -= n1x * kMix;
+				fy[e2.i] -= n1y * kMix;
+				fx[e2.j] -= n1x * kMix;
+				fy[e2.j] -= n1y * kMix;
+			}
+		}
+
+		return crossings;
+	}
+
+	function computeAverageEdgeLength() {
+		let sum = 0;
+		for (let i = 0; i < edgePairs.length; i++) {
+			const e = edgePairs[i];
+			const a = points[e.i];
+			const b = points[e.j];
+			sum += Math.hypot(b.x - a.x, b.y - a.y);
+		}
+		return sum / Math.max(1, edgePairs.length);
+	}
+
+	function applyForces(stepScalar) {
+		// Bounded move per inner iteration; small steps preserve stability.
+		const maxStep = 0.65;
+
+		for (let i = 0; i < points.length; i++) {
+			const p = points[i];
+			if (p.super) continue;
+
+			let dx = fx[i] * stepScalar;
+			let dy = fy[i] * stepScalar;
+
+			const d = Math.hypot(dx, dy);
+			if (d > maxStep) {
+				const s = maxStep / d;
+				dx *= s;
+				dy *= s;
+			}
+
+			p.x += dx;
+			p.y += dy;
+		}
+	}
+
+	// ----------------------------
+	// Drawing
+	// ----------------------------
+	function draw(crossingsLastFrame) {
+		ctx.fillStyle = "#111";
+		ctx.fillRect(0, 0, W, H);
+
+		// edges
+		ctx.strokeStyle = "rgba(200,200,200,0.55)";
+		ctx.lineWidth = 1;
+		ctx.beginPath();
+		for (let i = 0; i < edgePairs.length; i++) {
+			const e = edgePairs[i];
+			const a = points[e.i];
+			const b = points[e.j];
+			ctx.moveTo(a.x, a.y);
+			ctx.lineTo(b.x, b.y);
+		}
+		ctx.stroke();
+
+		// points
+		ctx.fillStyle = "#ddd";
+		for (let i = 0; i < points.length; i++) {
+			const p = points[i];
+			if (p.super) continue;
+			ctx.beginPath();
+			ctx.arc(p.x, p.y, 2.2, 0, Math.PI * 2);
+			ctx.fill();
+		}
+
+		info.textContent = `points ${points.length - superCount}, edges ${edgePairs.length}, crossings ${crossingsLastFrame}`;
+	}
+
+	// ----------------------------
+	// Regenerate + solve Delaunay
+	// ----------------------------
+	function regenerate() {
+		const N = Number(nSlider.value);
+
+		// Generate in central 50% region (25% margins) so it can expand.
+		const mx = W * 0.25;
+		const my = H * 0.25;
+
+		const pts = [];
+		for (let i = 0; i < N; i++) {
+			pts.push({
+				x: mx + Math.random() * (W - 2 * mx),
+				y: my + Math.random() * (H - 2 * my),
+				super: false
+			});
+		}
+
+		solveDelaunay(pts);
+		ensureForceArrays();
+	}
+
+	regenBtn.addEventListener("click", regenerate);
+
+	// ----------------------------
+	// Main animation loop
+	// ----------------------------
+	let crossingsLastFrame = 0;
+
+	function frame() {
+		if (!points.length) {
+			requestAnimationFrame(frame);
+			return;
+		}
+
+		const innerSteps = Number(steps.value);
+		const kFree = Number(freeK.value) / 1000;
+		const bias = Number(crossB.value) / 100;
+		let stepScalar = Number(alpha.value) / 1000;
+
+		// Adaptive step: if crossings persist, reduce step a bit this frame.
+		// (This is the scalar you described; keeps solver stable under strong back-pressure.)
+		if (crossingsLastFrame > 0) stepScalar *= 0.6;
+
+		// One visual frame = multiple solver iterations
+		let crossings = 0;
+
+		for (let it = 0; it < innerSteps; it++) {
+			ensureForceArrays();
+			zeroForces();
+
+			const avgLen = computeAverageEdgeLength();
+
+			// 1) free forces
+			addFreeForces(avgLen, kFree);
+			addBoundaryForces();
+
+			// 2) constraint back-pressure (fed back into totals)
+			crossings = addCrossingBackPressure(bias);
+
+			// Apply combined forces
+			applyForces(stepScalar);
+
+			// Early-out if stable
+			if (crossings === 0) break;
+		}
+
+		crossingsLastFrame = crossings;
+		draw(crossingsLastFrame);
+
+		requestAnimationFrame(frame);
+	}
+
+	// ----------------------------
+	// Boot
+	// ----------------------------
+	function boot() {
+		updateUiText();
+		resize();
+		regenerate();
+		requestAnimationFrame(frame);
+	}
+	boot();
+})();
+</script>
+</body>
+</html>
