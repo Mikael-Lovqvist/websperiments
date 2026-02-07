@@ -1,353 +1,70 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Gradient Editor</title>
-  <style>
-    :root { --bg:#0b0b10; --panel:#151722; --muted:#8f95b2; --text:#e9ecff; --accent:#5a67ff; }
-    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:14px/1.5 system-ui,Segoe UI,Roboto,Inter,Arial,sans-serif}
-    .wrap{max-width:980px;margin:24px auto;padding:16px}
-    h1{font-size:18px;font-weight:600;margin:0 0 12px}
-    .grid{display:grid;grid-template-columns:1.2fr 1fr;gap:16px}
-    .card{background:var(--panel);border-radius:12px;padding:12px;box-shadow:0 2px 16px rgba(0,0,0,.25)}
-    canvas{display:block;border-radius:10px}
-    #gradientCanvas{width:100%;height:96px;background:#111}
-    #picker{width:100%;height:180px;cursor:crosshair}
-    .toolbar{display:flex;gap:8px;align-items:center;margin:8px 0}
-    .btn{background:#23263a;border:1px solid #2f3350;color:var(--text);padding:6px 10px;border-radius:8px;cursor:pointer}
-    .btn:disabled{opacity:.5;cursor:not-allowed}
-    table{width:100%;border-collapse:separate;border-spacing:0 6px}
-    th,td{font-size:13px}
-    th{color:var(--muted);font-weight:600;text-align:left}
-    tr{background:#1a1d2c}
-    tr.sel{outline:2px solid var(--accent)}
-    td{padding:8px}
-    input[type="text"],input[type="number"]{width:100%;box-sizing:border-box;background:#0e1120;border:1px solid #2b3050;color:var(--text);border-radius:6px;padding:6px 8px}
-    .swatch{width:24px;height:24px;border-radius:6px;border:1px solid #00000055;display:inline-block;vertical-align:middle}
-    .row-actions{display:flex;gap:6px}
-    .muted{color:var(--muted)}
-    .small{font-size:12px}
-    cite a { color: #88f }
-  </style>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>Gradient Editor</title>
+
+	<link rel="stylesheet" href="gradient-editor.css">
 </head>
 <body>
-  <div class="wrap">
-    <h1>Histogram Gradient Editor</h1>
-    <div class="grid">
-      <div class="card">
-        <div class="toolbar">
-          <button id="addPoint" class="btn">Add point</button>
-          <button id="removePoint" class="btn" disabled>Remove selected</button>
-          <span class="muted small">Click the color canvas to set the selected point's color.</span>
-        </div>
-        <canvas id="gradientCanvas" width="960" height="1" aria-label="Gradient preview"></canvas>
-      </div>
-      <div class="card">
-        <canvas id="picker" width="600" height="180" aria-label="Color picker"></canvas>
-        <div class="muted small" style="margin-top:6px">Simple picker: hue horizontally; white overlay at top; black overlay at bottom.</div>
-      </div>
-    </div>
+	<div class="wrap">
+		<h1>Histogram Gradient Editor</h1>
 
-    <div class="card" style="margin-top:16px">
-      <table id="pointsTable">
-        <thead>
-          <tr>
-            <th style="width:40px">#</th>
-            <th style="width:80px">Swatch</th>
-            <th>Hex</th>
-            <th style="width:140px">Weight</th>
-            <th style="width:120px">Position</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-    <cite>ChatGPT (GPT-5). <a href="https://chatgpt.com/share/68b84c34-f84c-8005-8c8f-5b40936f9b0f">Gradient editor development discussion</a>. OpenAI, September 2025.</cite>
+		<div class="grid">
+			<div class="card">
+				<div class="toolbar">
+					<button id="addPoint" class="btn">Add point</button>
+					<button id="removePoint" class="btn" disabled>Remove selected</button>
+					<span class="muted small">Click the color canvas to set the selected point's color.</span>
+				</div>
+				<canvas id="gradientCanvas" width="960" height="1"></canvas>
+			</div>
 
-  </div>
+			<div class="card">
+				<canvas id="picker" width="600" height="180"></canvas>
+				<div class="muted small">Hue horizontal; white top; black bottom.</div>
+			</div>
+		</div>
 
-<script>
-(function(){
-  const gradientCanvas = document.getElementById('gradientCanvas');
-  const gctx = gradientCanvas.getContext('2d', { willReadFrequently: true });
-  const pickerCanvas = document.getElementById('picker');
-  const pctx = pickerCanvas.getContext('2d', { willReadFrequently: true });
-  const addBtn = document.getElementById('addPoint');
-  const removeBtn = document.getElementById('removePoint');
-  const tbody = document.querySelector('#pointsTable tbody');
+		<div class="card" style="margin-top:16px; margin-bottom:16px">
+			<table id="pointsTable">
+				<thead>
+					<tr>
+						<th style="width:40px">#</th>
+						<th style="width:80px">Swatch</th>
+						<th>Hex</th>
+						<th style="width:140px">Weight</th>
+						<th style="width:120px">Position</th>
+					</tr>
+				</thead>
+				<tbody></tbody>
+			</table>
+		</div>
 
-  // Helpers
-  const clamp = (v,min,max)=>Math.min(max,Math.max(min,v));
-  const lerp = (a,b,t)=>a+(b-a)*t;
-  const toHex2 = (n)=>n.toString(16).padStart(2,'0');
-  function rgbToHex(r,g,b){ return '#' + toHex2(r) + toHex2(g) + toHex2(b); }
-  function hexToRgb(hex){
-    if(!hex) return null;
-    hex = hex.trim();
-    const m3 = /^#?([0-9a-fA-F]{3})$/;
-    const m6 = /^#?([0-9a-fA-F]{6})$/;
-    let m;
-    if(m = hex.match(m3)){
-      const s=m[1];
-      const r=parseInt(s[0]+s[0],16), g=parseInt(s[1]+s[1],16), b=parseInt(s[2]+s[2],16);
-      return {r,g,b};
-    }
-    if(m = hex.match(m6)){
-      const s=m[1];
-      const r=parseInt(s.slice(0,2),16), g=parseInt(s.slice(2,4),16), b=parseInt(s.slice(4,6),16);
-      return {r,g,b};
-    }
-    return null;
-  }
+		<button id="exportShader" class="btn">Export OBS shader</button>
+		<button id="exportJSON" class="btn">Export JSON</button>
 
-  function drawPicker(){
-    const w=pickerCanvas.width, h=pickerCanvas.height;
-    const hue = pctx.createLinearGradient(0,0,w,0);
-    hue.addColorStop(0/6,'#f00');
-    hue.addColorStop(1/6,'#ff0');
-    hue.addColorStop(2/6,'#0f0');
-    hue.addColorStop(3/6,'#0ff');
-    hue.addColorStop(4/6,'#00f');
-    hue.addColorStop(5/6,'#f0f');
-    hue.addColorStop(1,'#f00');
-    pctx.fillStyle=hue; pctx.fillRect(0,0,w,h);
-    const whiteGrad=pctx.createLinearGradient(0,0,0,h);
-    whiteGrad.addColorStop(0,'rgba(255,255,255,1)');
-    whiteGrad.addColorStop(0.5,'rgba(255,255,255,0)');
-    pctx.fillStyle=whiteGrad; pctx.fillRect(0,0,w,h);
-    const blackGrad=pctx.createLinearGradient(0,0,0,h);
-    blackGrad.addColorStop(0.5,'rgba(0,0,0,0)');
-    blackGrad.addColorStop(1,'rgba(0,0,0,1)');
-    pctx.fillStyle=blackGrad; pctx.fillRect(0,0,w,h);
-  }
+	</div>
 
-  // Model: list of control points, each { hex, weight }
-  let points = [
-    { hex:'#008',    weight:0.75 }, // was #00F, now #008
-    { hex:'#8000ff', weight:0.75 },
-    { hex:'#ff0080', weight:1.00 },
-    { hex:'#ff8000', weight:0.75 },
-    { hex:'#ffffff', weight:1.00 },
-  ];
+	<dialog id="exportDialog" class="export-dialog">
+		<form method="dialog" class="export-form">
+			<h3 id="exportTitle"></h3>
 
-  // Selection state
-  let selected = 0;
+			<textarea
+				id="exportText"
+				readonly
+				spellcheck="false"></textarea>
 
-  function segmentWeights(pts){
-    const n=pts.length; const seg=[];
-    for(let i=0;i<n-1;i++) seg.push((pts[i].weight + pts[i+1].weight)/2);
-    return seg;
-  }
-
-  function positionsFromWeights(pts){
-    const seg = segmentWeights(pts);
-    const sum = seg.reduce((a,b)=>a+b,0) || 1;
-    const len = seg.map(s=>s/sum);
-    const t=[0];
-    for(let i=0;i<len.length;i++) t.push(t[t.length-1]+len[i]);
-    t[t.length-1]=1; // exact endpoint
-    return t; // size == pts.length
-  }
-
-  function drawGradient(){
-    const w = gradientCanvas.width, h = gradientCanvas.height;
-    const t = positionsFromWeights(points);
-
-    const img = gctx.createImageData(w,1);
-    const data = img.data;
-
-    // Precompute RGB from hex
-    const rgb = points.map(p=>hexToRgb(p.hex) || {r:0,g:0,b:0});
-
-    let si = 0; // segment index
-    for(let x=0;x<w;x++){
-      const u = x/(w-1);
-      // advance segment
-      while(si < t.length-2 && u > t[si+1]) si++;
-      const a = t[si], b = t[si+1];
-      const v = b>a ? (u - a)/(b - a) : 0;
-      const r = Math.round(lerp(rgb[si].r, rgb[si+1].r, v));
-      const g = Math.round(lerp(rgb[si].g, rgb[si+1].g, v));
-      const bch = Math.round(lerp(rgb[si].b, rgb[si+1].b, v));
-      const k = x*4;
-      data[k+0]=r; data[k+1]=g; data[k+2]=bch; data[k+3]=255;
-    }
-    // scale to full height
-    gctx.putImageData(img,0,0);
-    gctx.imageSmoothingEnabled=false;
-    gctx.drawImage(gradientCanvas,0,0,w,h);
-  }
-
-  function setSelected(i){
-    if (selected === i) return;
-    const rows = [...tbody.querySelectorAll('tr')];
-    if (rows[selected]) rows[selected].classList.remove('sel');
-    selected = i;
-    if (rows[selected]) rows[selected].classList.add('sel');
-  }
-
-  function refreshPositions(){
-    const t = positionsFromWeights(points);
-    const rows = tbody.querySelectorAll('tr');
-    for (let j = 0; j < rows.length; j++) {
-      const posCell = rows[j].lastElementChild; // position column
-      if (posCell) posCell.textContent = t[j].toFixed(6);
-    }
-    drawGradient();
-  }
-
-  // Update swatches (and non-focused hex inputs) to match current point colors,
-  // then redraw the gradient. Does not rebuild the table or steal focus.
-  function refreshColors(){
-    const rows = tbody.querySelectorAll('tr');
-    for (let j = 0; j < points.length; j++) {
-      const row = rows[j];
-      if (!row) continue;
-
-      const swatch = row.querySelector('.swatch');
-      if (swatch) swatch.style.background = points[j].hex;
-
-      const hexInput = row.querySelector('input[type="text"]');
-      if (hexInput && document.activeElement !== hexInput) {
-        hexInput.value = points[j].hex;  // keep focused input untouched
-      }
-    }
-    drawGradient();
-  }
+			<div class="toolbar export-toolbar">
+				<button id="copyExport" class="btn" type="button">Copy</button>
+				<button id="downloadExport" class="btn" type="button">Download</button>
+				<button class="btn">Close</button>
+			</div>
+		</form>
+	</dialog>
 
 
-  function updateTable(){
-    tbody.innerHTML='';
-    const t = positionsFromWeights(points);
-    points.forEach((p,i)=>{
-      const tr=document.createElement('tr');
-      if(i===selected) tr.classList.add('sel');
-
-      const tdIdx=document.createElement('td'); tdIdx.textContent=i+1; tr.appendChild(tdIdx);
-
-      const tdSw=document.createElement('td');
-      const sw=document.createElement('span'); sw.className='swatch'; sw.style.background=p.hex; tdSw.appendChild(sw); tr.appendChild(tdSw);
-
-      const tdHex=document.createElement('td');
-      const inpHex=document.createElement('input'); inpHex.type='text'; inpHex.value=p.hex; inpHex.placeholder='#rrggbb';
-
-
-      /* Possible refactor:
-      inpHex.addEventListener('change', () => {
-        const rgb = hexToRgb(inpHex.value);
-        if (rgb) {
-          p.hex = normalizeHex(inpHex.value);
-          drawGradient();
-          // remove updateTable() here
-        } else {
-          inpHex.value = p.hex;
-        }
-      });
-      */
-
-
-      tdHex.appendChild(inpHex); tr.appendChild(tdHex);
-
-      const tdW=document.createElement('td');
-      const inpW=document.createElement('input'); inpW.type='number'; inpW.min='0.01'; inpW.step='0.01'; inpW.value=p.weight.toString();
-
-      tdW.appendChild(inpW); tr.appendChild(tdW);
-
-      const tdPos=document.createElement('td');
-      tdPos.textContent = t[i].toFixed(6);
-      tr.appendChild(tdPos);
-
-      tr.addEventListener('click', (e) => {
-        setSelected(i);
-      });
-
-
-      inpHex.addEventListener('focus', () => setSelected(i));
-
-      inpHex.addEventListener('change',()=>{
-        const rgb=hexToRgb(inpHex.value);
-        if(rgb){ p.hex = normalizeHex(inpHex.value); refreshColors(); }
-        else { inpHex.value=p.hex; }
-      });
-
-      inpHex.addEventListener('input',()=>{
-        const rgb=hexToRgb(inpHex.value);
-        if(rgb){ p.hex = normalizeHex(inpHex.value); refreshColors(); }
-
-      });
-
-      inpW.addEventListener('focus',  () => setSelected(i));
-      inpW.addEventListener('input',()=>{ p.weight = Math.max(0.01, parseFloat(inpW.value)||1); refreshPositions(); });
-      inpW.addEventListener('change',()=>{ p.weight = Math.max(0.01, parseFloat(inpW.value)||1); refreshPositions(); });
-
-
-
-      tbody.appendChild(tr);
-    });
-    removeBtn.disabled = points.length<=2 || selected==null;
-  }
-
-  function normalizeHex(h){
-    h=h.trim(); if(h[0]!=='#') h='#'+h; // allow missing '#'
-    const rgb=hexToRgb(h); if(!rgb) return '#000000';
-    return rgbToHex(rgb.r,rgb.g,rgb.b);
-  }
-
-  function updateSelection(){ updateTable(); drawGradient(); }
-
-  function addPointAfter(idx){
-    const t = positionsFromWeights(points);
-    const left = Math.max(0, Math.min(idx, points.length-1));
-    const right = Math.min(left+1, points.length-1);
-    const u = (t[left] + t[right]) / 2;
-    const col = sampleGradient(u);
-    points.splice(left+1,0,{ hex: col, weight: 1.0 });
-    selected = left+1; updateSelection();
-  }
-
-  function sampleGradient(u){
-    const t = positionsFromWeights(points);
-    const rgb = points.map(p => hexToRgb(p.hex));
-    let i = 0;
-    while (i < t.length - 2 && u > t[i+1]) i++;
-    const a = t[i], b = t[i+1];
-    const v = b > a ? (u - a) / (b - a) : 0;
-    const rr = Math.round(lerp(rgb[i].r, rgb[i+1].r, v));
-    const gg = Math.round(lerp(rgb[i].g, rgb[i+1].g, v));
-    const bb = Math.round(lerp(rgb[i].b, rgb[i+1].b, v));
-    return rgbToHex(rr, gg, bb);
-  }
-
-  addBtn.addEventListener('click',()=>{
-    const idx = selected ?? (points.length-2);
-    addPointAfter(idx);
-  });
-
-  removeBtn.addEventListener('click',()=>{
-    if(points.length<=2 || selected==null) return;
-    points.splice(selected,1);
-    selected = Math.max(0, Math.min(selected, points.length-1));
-    updateSelection();
-  });
-
-  pickerCanvas.addEventListener('click', (e)=>{
-    if(selected==null) return;
-    const rect = pickerCanvas.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rect.left) * (pickerCanvas.width/rect.width));
-    const y = Math.floor((e.clientY - rect.top) * (pickerCanvas.height/rect.height));
-    const px = pctx.getImageData(x,y,1,1).data;
-    const hex = rgbToHex(px[0],px[1],px[2]);
-    points[selected].hex = hex; updateSelection();
-  });
-
-  // Initial render
-  drawPicker();
-  drawGradient();
-  updateTable();
-})();
-</script>
-
-
+	<script src="gradient-editor.js"></script>
 </body>
 </html>
