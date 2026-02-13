@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sphere Grid – Shader Math</title>
+<style>
+  html,body{margin:0;height:100%}
+  canvas{display:block;width:100%;height:100%;background:#111}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+
+async function loadPolygons(url) {
+
+  const res  = await fetch(url);
+  const data = await res.json();
+
+  const flat = [];
+  const ranges = [];
+
+  let offset = 0;
+
+  for (const poly of data.polygons) {
+
+    for (const v of poly)
+      flat.push(v[0], v[1]);
+
+    ranges.push({
+      first: offset,
+      count: poly.length
+    });
+
+    offset += poly.length;
+  }
+
+  const buffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(flat), gl.STATIC_DRAW);
+
+  return { buffer, ranges };
+}
+
+
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2');
+if (!gl) throw 'WebGL2 required';
+
+let polyData = null;
+
+loadPolygons('sweden.json').then(p => {
+  polyData = p;
+});
+
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width  = canvas.clientWidth  * dpr;
+  canvas.height = canvas.clientHeight * dpr;
+  gl.viewport(0,0,canvas.width,canvas.height);
+}
+window.addEventListener('resize',resize);
+resize();
+
+/* ---------------- Shader ---------------- */
+
+const vs = `#version 300 es
+layout(location=0) in vec2 aParam;   // (theta, phi)
+
+uniform float uTime;
+uniform float uAspect;
+
+void main() {
+
+  float theta = aParam.x;
+  float phi   = aParam.y;
+
+  float R = 1.0;
+
+  /* spherical → cartesian */
+  vec3 p = vec3(
+    R * cos(phi) * cos(theta),
+    R * cos(phi) * sin(theta),
+    R * sin(phi)
+  );
+
+  /* rotation (Y then X) */
+  float ay =  uTime * 0.;
+  float ax =  uTime * 0. + 0.8;
+  float az =  uTime * 0.5 ;
+
+  mat3 rotZ = mat3(
+    cos(az), -sin(az), 0.0,
+    sin(az),  cos(az), 0.0,
+    0.0,      0.0,     1.0
+  );
+
+  mat3 rotY = mat3(
+    cos(ay), 0.0, sin(ay),
+    0.0,     1.0, 0.0,
+    -sin(ay),0.0, cos(ay)
+  );
+
+  mat3 rotX = mat3(
+    1.0, 0.0,      0.0,
+    0.0, cos(ax), -sin(ax),
+    0.0, sin(ax),  cos(ax)
+  );
+
+  p = rotX * rotY * rotZ * p;
+
+  /* simple perspective */
+  float z = p.z - 4.0;
+  float f = 1.0 / tan(0.5 * 3.14159 / 4.0);
+
+  vec2 proj = vec2(
+    (f / uAspect) * p.x / -z,
+    f * p.y / -z
+  );
+
+  gl_Position = vec4(proj, 0.0, 1.0);
+}
+`;
+
+const fs = `#version 300 es
+precision mediump float;
+uniform vec4 uColor;
+out vec4 outColor;
+void main() {
+  outColor = uColor;
+}
+`;
+
+function shader(src,type){
+  const s=gl.createShader(type);
+  gl.shaderSource(s,src);
+  gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))
+    throw gl.getShaderInfoLog(s);
+  return s;
+}
+
+const prog=gl.createProgram();
+gl.attachShader(prog,shader(vs,gl.VERTEX_SHADER));
+gl.attachShader(prog,shader(fs,gl.FRAGMENT_SHADER));
+gl.linkProgram(prog);
+if(!gl.getProgramParameter(prog,gl.LINK_STATUS))
+  throw gl.getProgramInfoLog(prog);
+
+gl.useProgram(prog);
+
+const locTime   = gl.getUniformLocation(prog,'uTime');
+const locAspect = gl.getUniformLocation(prog,'uAspect');
+const locColor  = gl.getUniformLocation(prog,'uColor');
+
+/* ---------------- Geometry (angles only) ---------------- */
+
+const LAT = 36;
+const SEG = 36;
+
+/* latitude rings */
+const lat = [];
+for(let i=0;i<LAT;i++){
+  const phi = -Math.PI/2 + Math.PI*(i+1)/(LAT+1);
+  for(let j=0;j<=SEG;j++){
+    const theta = 2*Math.PI*j/SEG;
+    lat.push(theta,phi);
+  }
+}
+const latBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER,latBuf);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(lat),gl.STATIC_DRAW);
+
+/* longitude arcs */
+const lon = [];
+for(let i=0;i<SEG;i++){
+  const theta = 2*Math.PI*i/SEG;
+  for(let j=0;j<=LAT;j++){
+    const phi = -Math.PI/2 + Math.PI*j/LAT;
+    lon.push(theta,phi);
+  }
+}
+const lonBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER,lonBuf);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(lon),gl.STATIC_DRAW);
+
+gl.enable(gl.DEPTH_TEST);
+gl.clearColor(0.15,0.15,0.15,1);
+
+/* ---------------- Render ---------------- */
+
+function render(t){
+
+  gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
+
+  gl.uniform1f(locTime,t*0.001);
+  gl.uniform1f(locAspect,canvas.width/canvas.height);
+
+  /* latitude – red */
+  gl.uniform4f(locColor,.3,.3,.3,1);
+  gl.bindBuffer(gl.ARRAY_BUFFER,latBuf);
+  gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+  gl.enableVertexAttribArray(0);
+  for(let i=0;i<LAT;i++)
+    gl.drawArrays(gl.LINE_LOOP,i*(SEG+1),SEG+1);
+
+  /* longitude – green */
+
+  gl.bindBuffer(gl.ARRAY_BUFFER,lonBuf);
+  gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+  for(let i=0;i<SEG;i++)
+    gl.drawArrays(gl.LINE_STRIP,i*(LAT+1),LAT+1);
+
+  if (polyData) {
+
+    gl.clear(gl.DEPTH_BUFFER_BIT);
+
+    gl.uniform4f(locColor, 0, 1, 0, 1);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, polyData.buffer);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+    for (const r of polyData.ranges)
+      gl.drawArrays(gl.LINE_LOOP, r.first, r.count);
+  }
+
+
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+
+</script>
+</body>
+</html>
