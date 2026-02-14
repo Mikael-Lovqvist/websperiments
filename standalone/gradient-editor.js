@@ -1,5 +1,6 @@
 const exportShaderBtn = document.getElementById('exportShader');
 const exportJSONBtn   = document.getElementById('exportJSON');
+const exportESBtn   = document.getElementById('exportES');
 
 const exportDialog = document.getElementById('exportDialog');
 const exportText   = document.getElementById('exportText');
@@ -317,6 +318,42 @@ drawPicker();
 drawGradient();
 updateTable();
 
+function buildESGradientFunction() {
+  // t[0] = 0, t[n‑1] = 1
+  const t    = positionsFromWeights(points);          // [0, 0.222222, 0.481481, 0.740741, 1, …]
+  const rgb  = points.map(p => hexToRgb(p.hex));      // [{r,g,b}, …]
+
+  const out = [];
+  out.push("function gradient(t) {");
+  out.push("  t = Math.max(0, Math.min(1, t));");
+
+  const segCount = points.length - 1;   // number of segments
+  for (let i = 0; i < segCount; i++) {
+    const a   = t[i];
+    const b   = t[i + 1];
+    const c0  = rgb[i];
+    const c1  = rgb[i + 1];
+
+    // Condition
+    const cond =
+      i === 0
+        ? `if (t < ${b})`
+        : i === segCount - 1
+        ? `else`
+        : `else if (t < ${b})`;
+
+    out.push(`  ${cond} {`);
+    const ratio = `(t - ${a}) / (${b} - ${a})`;
+    out.push(`    const r = Math.round(${c0.r} + (${c1.r} - ${c0.r}) * ${ratio});`);
+    out.push(`    const g = Math.round(${c0.g} + (${c1.g} - ${c0.g}) * ${ratio});`);
+    out.push(`    const b = Math.round(${c0.b} + (${c1.b} - ${c0.b}) * ${ratio});`);
+    out.push("    return { r, g, b };");
+    out.push("  }");
+  }
+
+  out.push("}");
+  return out.join("\n");
+}
 
 function buildShaderFunction() {
 	const t = positionsFromWeights(points);
@@ -409,5 +446,15 @@ exportJSONBtn.addEventListener('click', () => {
 		text: buildJSON(),
 		filename: "gradient.json",
 		mime: "application/json"
+	});
+});
+
+
+exportESBtn.addEventListener('click', () => {
+	showExportDialog({
+		title: "EcmaScript: gradient()",
+		text: buildESGradientFunction(),
+		filename: "gradient.js",
+		mime: "application/js"
 	});
 });
